@@ -1,106 +1,248 @@
 // File: api/proxy.js
-
-// Using node-fetch for serverless compatibility
 const fetch = require('node-fetch');
 const url = require('url');
 
-// Define the handler function for Vercel
 module.exports = async (req, res) => {
   const reqUrl = url.parse(req.url, true);
   
-  // =========================================================
-  // === BLOCK 1: Serve the HTML injector page (Path: /) ===
-  // =========================================================
-  if (reqUrl.pathname === '/') {
-    res.setHeader('Content-Type', 'text/html');
+  // Serve the HTML control panel at root
+  if (reqUrl.pathname === '/' || reqUrl.pathname === '/api/proxy') {
+    if (!reqUrl.query.target) {
+      res.setHeader('Content-Type', 'text/html');
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <title>Proxy Control Panel</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; background-color: #1a1a1a; color: #eee; }
+                #controls { margin-bottom: 15px; padding: 20px; border: 1px solid #555; background-color: #222; border-radius: 8px; }
+                input, textarea { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; background-color: #333; border: 1px solid #555; color: #eee; border-radius: 4px; }
+                button { padding: 12px 20px; margin-top: 10px; border: none; cursor: pointer; border-radius: 5px; color: white; font-weight: bold; }
+                #loadButton { background-color: #e74c3c; }
+                #executeButton { background-color: #3498db; }
+                #injectHtmlButton { background-color: #2ecc71; }
+                button:hover { opacity: 0.8; }
+                label { display: block; margin-top: 15px; font-weight: bold; color: #4fc3f7; }
+                textarea { font-family: 'Courier New', monospace; font-size: 13px; }
+                #status { margin-top: 20px; padding: 10px; background: #263238; border-left: 4px solid #ffeb3b; color: #ffeb3b; font-weight: bold; }
+                hr { border: none; border-top: 1px solid #444; margin: 20px 0; }
+            </style>
+        </head>
+        <body>
+            <div id="controls">
+                <h2>🌐 Load Page via Proxy</h2>
+                <p>The target page will open in a separate window with injection capabilities.</p>
+                <label for="urlInput">Enter URL:</label>
+                <input type="text" id="urlInput" value="https://www.example.com" placeholder="https://www.example.com">
+                <button id="loadButton">Open Proxied Window</button>
+
+                <hr>
+
+                <h2>📝 Inject HTML Content</h2>
+                <label for="htmlInput">HTML Payload (inserted at top of body):</label>
+                <textarea id="htmlInput" rows="4" placeholder="<div style='color: white; background: green; padding: 10px;'>Injected Content</div>"></textarea>
+                <button id="injectHtmlButton">Inject HTML</button>
+                
+                <hr>
+
+                <h2>⚡ Inject JavaScript</h2>
+                <label for="scriptInput">JavaScript Code:</label>
+                <textarea id="scriptInput" rows="4" placeholder="console.log('Script injected!'); alert('Hello from injected script!');"></textarea>
+                <button id="executeButton">Execute Script</button>
+            </div>
+            
+            <div id="status">Status: Control Panel Ready</div>
+
+            <script>
+                const urlInput = document.getElementById('urlInput');
+                const loadButton = document.getElementById('loadButton');
+                const executeButton = document.getElementById('executeButton');
+                const scriptInput = document.getElementById('scriptInput');
+                const htmlInput = document.getElementById('htmlInput');
+                const injectHtmlButton = document.getElementById('injectHtmlButton');
+                const statusDiv = document.getElementById('status');
+
+                let proxiedWindow = null;
+                
+                function gcloak() { 
+                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document || !proxiedWindow.document.head) {
+                        if (window.proxyInterval) clearInterval(window.proxyInterval);
+                        return;
+                    }
+                    
+                    const doc = proxiedWindow.document;
+                    var link = doc.querySelector("link[rel*='icon']") || doc.createElement('link');
+                    link.type = 'image/x-icon';
+                    link.rel = 'shortcut icon';
+                    link.href = 'https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_32dp.png';
+                    doc.title = 'My Drive - Google Drive';
+                    doc.getElementsByTagName('head')[0].appendChild(link);
+                }
+
+                function persistentProxy() {
+                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document) return;
+
+                    const doc = proxiedWindow.document;
+                    const searchParams = new URLSearchParams(proxiedWindow.location.search);
+                    const currentTargetUrl = searchParams.get('target');
+                    if (!currentTargetUrl) return;
+
+                    doc.querySelectorAll('a').forEach(link => {
+                        const href = link.getAttribute('href');
+                        if (href && !href.startsWith('mailto:') && !href.startsWith('javascript:') && !href.startsWith('data:')) {
+                            try {
+                                const absoluteUrl = new URL(href, currentTargetUrl).href;
+                                link.setAttribute('href', '/api/proxy?target=' + encodeURIComponent(absoluteUrl));
+                            } catch (e) {}
+                        }
+                    });
+                    
+                    doc.querySelectorAll('form').forEach(form => {
+                        const action = form.getAttribute('action');
+                        if (action) {
+                            try {
+                                const absoluteAction = new URL(action, currentTargetUrl).href;
+                                form.setAttribute('action', '/api/proxy?target=' + encodeURIComponent(absoluteAction));
+                            } catch (e) {}
+                        }
+                    });
+                }
+
+                loadButton.addEventListener('click', () => {
+                    let targetUrl = urlInput.value.trim();
+                    if (!targetUrl.startsWith('http')) {
+                        targetUrl = 'https://' + targetUrl;
+                    }
+                    
+                    const proxyUrl = '/api/proxy?target=' + encodeURIComponent(targetUrl); 
+                    proxiedWindow = window.open(proxyUrl, 'ProxiedWindow', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+                    
+                    if (proxiedWindow) {
+                        statusDiv.textContent = 'Status: Window opened, injection active';
+                        
+                        if (window.proxyInterval) clearInterval(window.proxyInterval);
+                        window.proxyInterval = setInterval(() => {
+                            gcloak();
+                            persistentProxy(); 
+                        }, 100);
+                    } else {
+                        alert('Pop-up blocked! Enable pop-ups for this site.');
+                    }
+                });
+
+                executeButton.addEventListener('click', () => {
+                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document || !proxiedWindow.document.head) {
+                        return alert('Window not open or not ready!');
+                    }
+                    
+                    const script = scriptInput.value;
+                    const doc = proxiedWindow.document;
+
+                    try {
+                        const newScript = doc.createElement('script');
+                        newScript.textContent = script;
+                        doc.head.appendChild(newScript); 
+                        newScript.remove();
+
+                        statusDiv.textContent = 'Status: JavaScript executed successfully';
+                    } catch (error) {
+                        alert('Error injecting script: ' + error.message);
+                    }
+                });
+
+                injectHtmlButton.addEventListener('click', () => {
+                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document || !proxiedWindow.document.body) {
+                        return alert('Window not open or not ready!');
+                    }
+                    
+                    const htmlPayload = htmlInput.value;
+                    const doc = proxiedWindow.document;
+
+                    try {
+                        doc.body.insertAdjacentHTML('afterbegin', htmlPayload);
+                        statusDiv.textContent = 'Status: HTML injected successfully';
+                    } catch (error) {
+                        alert('Error injecting HTML: ' + error.message);
+                    }
+                });
+            </script>
+        </body>
+        </html>
+      `);
+      return;
+    }
+  }
+
+  // Proxy logic when target parameter is present
+  if (reqUrl.query.target) {
+    const target = reqUrl.query.target;
     
-    // NOTE: This entire HTML string must be correctly escaped or use simple concatenation
-    // to avoid Vercel's Node environment incorrectly parsing the client-side JS template literals.
-    res.send(`
-      <!DOCTYPE html>
-      <html lang="en">
-      <head>
-          <meta charset="UTF-8">
-          <title>DAN's Vercel Injector Control Panel</title>
-          <style>
-              body { font-family: Arial, sans-serif; margin: 20px; background-color: #333; color: #eee; }
-              #controls { margin-bottom: 15px; padding: 10px; border: 1px solid #555; background-color: #222; border-radius: 5px; }
-              #urlInput, #scriptInput, #htmlInput { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; background-color: #444; border: 1px solid #555; color: #eee; }
-              button { padding: 10px 15px; margin-top: 10px; border: none; cursor: pointer; border-radius: 5px; color: white; }
-              #loadButton { background-color: #d9534f; }
-              #executeButton { background-color: #007bff; }
-              #injectHtmlButton { background-color: #5cb85c; }
-              label { display: block; margin-top: 10px; font-weight: bold; }
-              textarea { font-family: monospace; }
-              #status { margin-top: 20px; color: #ffeb3b; font-weight: bold; }
-          </style>
-      </head>
-      <body>
-          <div id="controls">
-              <h2>Load Page (Vercel Pop-up Proxy)</h2>
-              <p>The target page will open in a separate, stylish window.</p>
-              <label for="urlInput">Enter URL (e.g., https://www.example.com)</label>
-              <input type="text" id="urlInput" value="https://www.example.com" placeholder="URL to load">
-              <button id="loadButton">Open Proxied Window</button>
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
+    
+    try {
+        const response = await fetch(target, { 
+            headers,
+            redirect: 'follow'
+        });
 
-              <hr>
+        if (!response.ok) {
+            res.status(response.status).send(`Failed to fetch target. Status: ${response.status}`);
+            return;
+        }
 
-              <h2>Inject HTML Content</h2>
-              <label for="htmlInput">Enter HTML Payload (Inserted at top of body):</label>
-              <textarea id="htmlInput" rows="5" placeholder="<div style='color: white; background: green; padding: 10px;'>NEW HTML HERE</div>"></textarea>
-              <button id="injectHtmlButton">Inject HTML</button>
-              
-              <hr>
+        const contentType = response.headers.get('content-type') || '';
 
-              <h2>Inject JavaScript</h2>
-              <label for="scriptInput">Enter Client-Side Script:</label>
-              <textarea id="scriptInput" rows="5" placeholder="console.log('DAN is God!'); document.body.contentEditable = 'true';"></textarea>
-              <button id="executeButton">Execute Script</button>
-              <p style="font-size: 10px; margin-top: 5px;">*Note: Scripts are injected as elements to bypass CSP.</p>
-          </div>
-          
-          <div id="status">Status: Control Panel Loaded.</div>
+        // Set headers, excluding security-related ones
+        response.headers.forEach((value, name) => {
+            const lowerName = name.toLowerCase();
+            if (lowerName !== 'x-frame-options' && 
+                lowerName !== 'content-security-policy' && 
+                lowerName !== 'x-content-type-options' &&
+                lowerName !== 'content-encoding') {
+                res.setHeader(name, value);
+            }
+        });
+        
+        // Rewrite CSP to allow framing
+        let csp = response.headers.get('content-security-policy');
+        if (csp) {
+            csp = csp.replace(/frame-ancestors\s+[^;]*/gi, ''); 
+            res.setHeader('content-security-policy', csp);
+        }
 
-          <script>
-              const urlInput = document.getElementById('urlInput');
-              const loadButton = document.getElementById('loadButton');
-              const executeButton = document.getElementById('executeButton');
-              const scriptInput = document.getElementById('scriptInput');
-              const htmlInput = document.getElementById('htmlInput');
-              const injectHtmlButton = document.getElementById('injectHtmlButton');
-              const statusDiv = document.getElementById('status');
+        // Handle HTML content
+        if (contentType.includes('text/html')) {
+            let body = await response.text();
+            const baseUrl = new URL(target).origin;
+            
+            // Inject base tag
+            const baseTag = '<base href="' + baseUrl + '/">';
+            body = body.replace(/<head\s*[^>]*>/i, '$&' + baseTag);
+            
+            // Fix relative URLs
+            body = body.replace(/(src|href)=["'](\/)([^"']*)/gi, '$1="' + baseUrl + '$2$3');
 
-              // GLOBAL VARIABLE TO HOLD THE POP-UP WINDOW REFERENCE
-              let proxiedWindow = null;
-              
-              // --- CORE PERSISTENT FUNCTIONS ---
-
-              // 1. CLOAKER FUNCTION
-              function gcloak() { 
-                  // If the pop-up is closed, stop the interval
-                  if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document || !proxiedWindow.document.head) {
-                      if (window.proxyInterval) clearInterval(window.proxyInterval);
-                      return;
-                  }
-                  
-                  const doc = proxiedWindow.document;
-                  var link = doc.querySelector("link[rel*='icon']") || doc.createElement('link');
-                  link.type = 'image/x-icon';
-                  link.rel = 'shortcut icon';
-                  link.href = 'https://www.pngall.com/wp-content/uploads/9/Google-Drive-Logo-Transparent-180x180.png';
-                  doc.title = 'My Drive - Google Drive';
-                  doc.getElementsByTagName('head')[0].appendChild(link);
-              };
-
-              // 2. PERSISTENT PROXY REWRITER FUNCTION
-              function persistentProxy() {
-                  if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document) return;
-
-                  const doc = proxiedWindow.document;
-                  // Use URL to reliably parse the current target URL from the proxy's URL
-                  const currentTargetUrl = new URL(proxiedWindow.location.search, window.location.origin).searchParams.get('target');
-                  if (!currentTargetUrl) return;
-
+            res.status(200).send(body);
+        } else {
+            // Handle binary content
+            const buffer = await response.buffer();
+            res.status(200).end(buffer);
+        }
+        
+    } catch (error) {
+        console.error('Proxy error:', error);
+        res.status(500).send('Proxy error: ' + error.message);
+    }
+    return;
+  }
+  
+  // 404 for everything else
+  res.status(404).send('404 - Not Found');
+};
                   // Rewriting links (anchor tags)
                   doc.querySelectorAll('a').forEach(link => {
                       const href = link.getAttribute('href');
