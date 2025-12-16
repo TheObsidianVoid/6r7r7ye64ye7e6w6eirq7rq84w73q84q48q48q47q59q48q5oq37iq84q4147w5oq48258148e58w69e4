@@ -1,111 +1,32 @@
 // File: api/proxy.js
 const fetch = require('node-fetch');
-const url = require('url');
 
 module.exports = async (req, res) => {
-  const reqUrl = url.parse(req.url, true);
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   
-  // Serve the HTML control panel at root
-  if (reqUrl.pathname === '/' || reqUrl.pathname === '/api/proxy') {
-    if (!reqUrl.query.target) {
-      res.setHeader('Content-Type', 'text/html');
-      res.status(200).send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <title>Proxy Control Panel</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; background-color: #1a1a1a; color: #eee; }
-                #controls { margin-bottom: 15px; padding: 20px; border: 1px solid #555; background-color: #222; border-radius: 8px; }
-                input, textarea { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; background-color: #333; border: 1px solid #555; color: #eee; border-radius: 4px; }
-                button { padding: 12px 20px; margin-top: 10px; border: none; cursor: pointer; border-radius: 5px; color: white; font-weight: bold; }
-                #loadButton { background-color: #e74c3c; }
-                #executeButton { background-color: #3498db; }
-                #injectHtmlButton { background-color: #2ecc71; }
-                button:hover { opacity: 0.8; }
-                label { display: block; margin-top: 15px; font-weight: bold; color: #4fc3f7; }
-                textarea { font-family: 'Courier New', monospace; font-size: 13px; }
-                #status { margin-top: 20px; padding: 10px; background: #263238; border-left: 4px solid #ffeb3b; color: #ffeb3b; font-weight: bold; }
-                hr { border: none; border-top: 1px solid #444; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <div id="controls">
-                <h2>🌐 Load Page via Proxy</h2>
-                <p>The target page will open in a separate window with injection capabilities.</p>
-                <label for="urlInput">Enter URL:</label>
-                <input type="text" id="urlInput" value="https://www.example.com" placeholder="https://www.example.com">
-                <button id="loadButton">Open Proxied Window</button>
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
 
-                <hr>
-
-                <h2>📝 Inject HTML Content</h2>
-                <label for="htmlInput">HTML Payload (inserted at top of body):</label>
-                <textarea id="htmlInput" rows="4" placeholder="<div style='color: white; background: green; padding: 10px;'>Injected Content</div>"></textarea>
-                <button id="injectHtmlButton">Inject HTML</button>
-                
-                <hr>
-
-                <h2>⚡ Inject JavaScript</h2>
-                <label for="scriptInput">JavaScript Code:</label>
-                <textarea id="scriptInput" rows="4" placeholder="console.log('Script injected!'); alert('Hello from injected script!');"></textarea>
-                <button id="executeButton">Execute Script</button>
-            </div>
-            
-            <div id="status">Status: Control Panel Ready</div>
-
-            <script>
-                const urlInput = document.getElementById('urlInput');
-                const loadButton = document.getElementById('loadButton');
-                const executeButton = document.getElementById('executeButton');
-                const scriptInput = document.getElementById('scriptInput');
-                const htmlInput = document.getElementById('htmlInput');
-                const injectHtmlButton = document.getElementById('injectHtmlButton');
-                const statusDiv = document.getElementById('status');
-
-                let proxiedWindow = null;
-                
-                function gcloak() { 
-                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document || !proxiedWindow.document.head) {
-                        if (window.proxyInterval) clearInterval(window.proxyInterval);
-                        return;
-                    }
-                    
-                    const doc = proxiedWindow.document;
-                    var link = doc.querySelector("link[rel*='icon']") || doc.createElement('link');
-                    link.type = 'image/x-icon';
-                    link.rel = 'shortcut icon';
-                    link.href = 'https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_32dp.png';
-                    doc.title = 'My Drive - Google Drive';
-                    doc.getElementsByTagName('head')[0].appendChild(link);
-                }
-
-                function persistentProxy() {
-                    if (!proxiedWindow || proxiedWindow.closed || !proxiedWindow.document) return;
-
-                    const doc = proxiedWindow.document;
-                    const searchParams = new URLSearchParams(proxiedWindow.location.search);
-                    const currentTargetUrl = searchParams.get('target');
-                    if (!currentTargetUrl) return;
-
-                    doc.querySelectorAll('a').forEach(link => {
-                        const href = link.getAttribute('href');
-                        if (href && !href.startsWith('mailto:') && !href.startsWith('javascript:') && !href.startsWith('data:')) {
-                            try {
-                                const absoluteUrl = new URL(href, currentTargetUrl).href;
-                                link.setAttribute('href', '/api/proxy?target=' + encodeURIComponent(absoluteUrl));
-                            } catch (e) {}
-                        }
-                    });
-                    
-                    doc.querySelectorAll('form').forEach(form => {
-                        const action = form.getAttribute('action');
-                        if (action) {
-                            try {
-                                const absoluteAction = new URL(action, currentTargetUrl).href;
-                                form.setAttribute('action', '/api/proxy?target=' + encodeURIComponent(absoluteAction));
-                            } catch (e) {}
+  // Parse query parameters
+  const { target } = req.query;
+  
+  // If no target, show control panel
+  if (!target) {
+    res.setHeader('Content-Type', 'text/html');
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <title>Proxy Control Panel</title>
+          <style>
+              body { font-family: Arial, sans-serif; margin: 20px; background-color: #1a1a1a; color: #eee; }
+              #controls { margin-bottom: 15px; padding: 20px; border: 1px solid #555; background-color: #222; border-radius: 8px; }
+              input, textarea { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; background-color: #333; border: 1px solid #555; color: #eee; border-radius: 4px; }                            } catch (e) {}
                         }
                     });
                 }
