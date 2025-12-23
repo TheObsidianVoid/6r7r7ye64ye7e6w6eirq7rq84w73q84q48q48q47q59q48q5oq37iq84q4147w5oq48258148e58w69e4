@@ -5,14 +5,9 @@
 // Define the handler function for Vercel
 module.exports = async (req, res) => {
     
-    // 1. CONSTRUCT THE MODERN URL OBJECT
-    // Use the full URL from Vercel's environment if available, otherwise reconstruct it
+    // Construct the modern URL object
     const fullUrl = 'https://' + req.headers.host + req.url;
-    
-    // The modern, standardized way to parse the request URL:
     const reqUrl = new URL(fullUrl);
-    
-    // Get the target parameter directly from the search params
     const target = reqUrl.searchParams.get('target');
     
     // Check if the request is trying to proxy a URL and the path is correct
@@ -41,7 +36,13 @@ module.exports = async (req, res) => {
             // 1. HEADER STRIPPING & TRANSFER
             response.headers.forEach((value, name) => {
                 const lowerName = name.toLowerCase();
-                // Block specific security headers
+                
+                // *** CRITICAL FIX: Strip Content-Encoding to prevent double decompression ***
+                if (lowerName === 'content-encoding') {
+                    return; // Skip this header entirely
+                }
+
+                // Block other security headers
                 if (lowerName !== 'x-frame-options' && lowerName !== 'content-security-policy' && lowerName !== 'x-content-type-options') {
                     res.setHeader(name, value);
                 }
@@ -62,7 +63,7 @@ module.exports = async (req, res) => {
             if (contentType.includes('text/html')) {
                 let body = await response.text();
                 
-                // IMPORTANT: Use the WHATWG URL constructor here as well
+                // Use the WHATWG URL constructor here as well
                 const targetUrlObject = new URL(target);
                 const baseUrl = targetUrlObject.origin;
                 
