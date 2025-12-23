@@ -1,19 +1,25 @@
 // File: api/proxy.js
 
-// Native Node.js fetch (available on Vercel Node 18+)
+// Using native fetch and the WHATWG URL API (available on Vercel Node 18+)
 
 // Define the handler function for Vercel
 module.exports = async (req, res) => {
-    // Vercel routes all requests through the function. We only care about /api/proxy.
-    const reqUrl = require('url').parse(req.url, true);
     
-    // Check if the request is trying to proxy a URL
-    if (reqUrl.pathname === '/api/proxy' && reqUrl.query.target) {
-        let target = reqUrl.query.target;
+    // 1. CONSTRUCT THE MODERN URL OBJECT
+    // Use the full URL from Vercel's environment if available, otherwise reconstruct it
+    const fullUrl = 'https://' + req.headers.host + req.url;
+    
+    // The modern, standardized way to parse the request URL:
+    const reqUrl = new URL(fullUrl);
+    
+    // Get the target parameter directly from the search params
+    const target = reqUrl.searchParams.get('target');
+    
+    // Check if the request is trying to proxy a URL and the path is correct
+    if (reqUrl.pathname === '/api/proxy' && target) {
         
         // Define the spoofed headers for the target request
         const requestHeaders = {
-            // Forwarding the user-agent is important for Vercel functions
             'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         };
         
@@ -55,7 +61,10 @@ module.exports = async (req, res) => {
             // 2. CONTENT REWRITING (HTML only)
             if (contentType.includes('text/html')) {
                 let body = await response.text();
-                const baseUrl = new URL(target).origin;
+                
+                // IMPORTANT: Use the WHATWG URL constructor here as well
+                const targetUrlObject = new URL(target);
+                const baseUrl = targetUrlObject.origin;
                 
                 // Fix 1: Inject the base tag
                 const baseTag = `<base href="${baseUrl}/">`;
@@ -77,7 +86,6 @@ module.exports = async (req, res) => {
             
         } catch (error) {
             console.error('Vercel proxy fetch error:', error);
-            // Send 504 Gateway Timeout if the fetch itself failed (often a timeout)
             res.statusCode = 504; 
             res.end('Fucking Vercel proxy fetch failed (Possible Timeout/DNS Error).');
         }
