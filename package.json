@@ -1,0 +1,9 @@
+{
+  "name": "vercel-proxy-injector",
+  "version": "1.0.0",
+  "description": "A serverless proxy for content injection.",
+  "main": "api/proxy.js",
+  "dependencies": {
+    "node-fetch": "^2.6.1"
+  }
+}
