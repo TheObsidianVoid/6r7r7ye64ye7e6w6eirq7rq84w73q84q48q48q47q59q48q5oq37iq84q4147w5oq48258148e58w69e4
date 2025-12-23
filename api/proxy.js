@@ -37,12 +37,12 @@ module.exports = async (req, res) => {
             response.headers.forEach((value, name) => {
                 const lowerName = name.toLowerCase();
                 
-                // *** CRITICAL FIX: Strip Content-Encoding to prevent double decompression ***
+                // CRITICAL FIX: Strip Content-Encoding to prevent double decompression
                 if (lowerName === 'content-encoding') {
-                    return; // Skip this header entirely
+                    return; 
                 }
 
-                // Block other security headers
+                // Block security headers
                 if (lowerName !== 'x-frame-options' && lowerName !== 'content-security-policy' && lowerName !== 'x-content-type-options') {
                     res.setHeader(name, value);
                 }
@@ -58,20 +58,21 @@ module.exports = async (req, res) => {
             // Set the response status code
             res.statusCode = response.status;
 
-
             // 2. CONTENT REWRITING (HTML only)
             if (contentType.includes('text/html')) {
                 let body = await response.text();
                 
-                // Use the WHATWG URL constructor here as well
                 const targetUrlObject = new URL(target);
                 const baseUrl = targetUrlObject.origin;
                 
+                // Set Content-Type explicitly for HTML (since we modified the body)
+                res.setHeader('Content-Type', 'text/html');
+
                 // Fix 1: Inject the base tag
                 const baseTag = `<base href="${baseUrl}/">`;
                 body = body.replace(/<head\s*[^>]*>/i, `$&${baseTag}`);
                 
-                // Fix 2: AGGRESSIVE RELATIVE URL REWRITING (Ensures images/CSS load)
+                // Fix 2: AGGRESSIVE RELATIVE URL REWRITING
                 const regex = /(src|href|url)\s*=\s*['"](\/[^'"])/gi;
                 body = body.replace(regex, (match, p1, p2) => {
                     return `${p1}="${baseUrl}${p2}`;
@@ -81,14 +82,25 @@ module.exports = async (req, res) => {
                 console.log('Successfully proxied and rewrote HTML content.');
 
             } else {
-                // For non-HTML (images, CSS, JS), stream the raw response body directly
+                // *** CRITICAL FIX FOR BINARY/NON-HTML ASSETS ***
+                // Ensure Content-Type is set for images, CSS, JS, etc. before streaming
+                res.setHeader('Content-Type', contentType);
+                
+                // Stream the raw response body directly for performance
                 response.body.pipe(res);
+                
+                // Handle streaming errors
+                response.body.on('error', (err) => {
+                    console.error('Stream error:', err);
+                    res.end();
+                });
             }
             
         } catch (error) {
             console.error('Vercel proxy fetch error:', error);
-            res.statusCode = 504; 
-            res.end('Fucking Vercel proxy fetch failed (Possible Timeout/DNS Error).');
+            // Use 500 for general fetch failure
+            res.statusCode = 500; 
+            res.end('Fucking Vercel proxy fetch failed (Internal Error).');
         }
 
         return;
