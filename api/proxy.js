@@ -1,38 +1,42 @@
 // File: api/proxy.js
 
-// Using node-fetch for serverless compatibility
-const fetch = require('node-fetch');
-const url = require('url');
+// Native Node.js fetch (available on Vercel Node 18+)
 
 // Define the handler function for Vercel
 module.exports = async (req, res) => {
     // Vercel routes all requests through the function. We only care about /api/proxy.
-    const reqUrl = url.parse(req.url, true);
+    const reqUrl = require('url').parse(req.url, true);
     
     // Check if the request is trying to proxy a URL
     if (reqUrl.pathname === '/api/proxy' && reqUrl.query.target) {
         let target = reqUrl.query.target;
         
         // Define the spoofed headers for the target request
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        const requestHeaders = {
+            // Forwarding the user-agent is important for Vercel functions
+            'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         };
         
         try {
-            // Use node-fetch for the external request
-            const response = await fetch(target, { headers });
+            // Use native fetch for the external request
+            const response = await fetch(target, { 
+                method: req.method, // Forward the request method (GET/POST)
+                headers: requestHeaders, 
+            });
 
             if (!response.ok) {
-                res.status(response.status).send(`Proxy failed to fetch the target page. Status: ${response.status}`);
+                res.statusCode = response.status;
+                res.end(`Proxy failed to fetch the target page. Status: ${response.status}`);
                 return;
             }
 
             const contentType = response.headers.get('content-type') || '';
 
-            // 1. HEADER STRIPPING: Crucial for bypassing X-Frame-Options and CSP
+            // 1. HEADER STRIPPING & TRANSFER
             response.headers.forEach((value, name) => {
+                const lowerName = name.toLowerCase();
                 // Block specific security headers
-                if (name.toLowerCase() !== 'x-frame-options' && name.toLowerCase() !== 'content-security-policy' && name.toLowerCase() !== 'x-content-type-options') {
+                if (lowerName !== 'x-frame-options' && lowerName !== 'content-security-policy' && lowerName !== 'x-content-type-options') {
                     res.setHeader(name, value);
                 }
             });
@@ -44,7 +48,11 @@ module.exports = async (req, res) => {
                 res.setHeader('content-security-policy', csp);
             }
 
-            // 2. CONTENT REWRITING: Inject the <base> tag and fix relative URLs (HTML only).
+            // Set the response status code
+            res.statusCode = response.status;
+
+
+            // 2. CONTENT REWRITING (HTML only)
             if (contentType.includes('text/html')) {
                 let body = await response.text();
                 const baseUrl = new URL(target).origin;
@@ -59,24 +67,25 @@ module.exports = async (req, res) => {
                     return `${p1}="${baseUrl}${p2}`;
                 });
 
-                res.send(body);
+                res.end(body);
                 console.log('Successfully proxied and rewrote HTML content.');
 
             } else {
-                // For non-HTML (images, CSS, JS), stream the raw buffer
-                const buffer = await response.buffer();
-                res.send(buffer);
+                // For non-HTML (images, CSS, JS), stream the raw response body directly
+                response.body.pipe(res);
             }
             
         } catch (error) {
             console.error('Vercel proxy fetch error:', error);
-            res.status(500).send('Fucking Vercel proxy fetch error on the back end.');
+            // Send 504 Gateway Timeout if the fetch itself failed (often a timeout)
+            res.statusCode = 504; 
+            res.end('Fucking Vercel proxy fetch failed (Possible Timeout/DNS Error).');
         }
 
         return;
     }
     
-    // If a request hits the /api/proxy path without a target, 
-    // or if a request hits any other API route, send 404.
-    res.status(404).send('404 - API Route Not Found or Missing Target Parameter.');
+    // Default 404 for API routes
+    res.statusCode = 404;
+    res.end('404 - API Route Not Found or Missing Target Parameter.');
 };
